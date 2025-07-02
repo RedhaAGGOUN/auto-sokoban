@@ -87,3 +87,26 @@ The level editor allows you to create and save your own Sokoban puzzles.
 ## 📂 Project Structure
 
 The project is organized into several modules to separate concerns:
+├── assets/ # Contains all images and sound files
+├── custom_levels/ # User-created levels are saved here as .json
+├── main.py # Main application entry point and game loop manager
+├── ui.py # Handles all UI screens, rendering, and user input
+├── game.py # Core game state, level management, and player data
+├── core.py # Stateless game logic (move function, win check)
+├── solver.py # BFS-based puzzle solver
+├── assets.py # Asset loading and management class
+├── config.py # Game configuration (FPS, tile size, colors)
+├── constants.py # Game object enumerations (Wall, Box, etc.)
+├── save_load.py # Helper functions for saving/loading JSON data
+├── sokoban_save.json # Save file for player profiles and scores
+└── requirements.txt # Python package dependencies
+└── README.md # This file
+
+## 💾 Save Data
+
+*   **Player Progress**: All player profiles, stars earned, and last play times are stored in `sokoban_save.json`.
+*   **Custom Levels**: Each custom level you create is saved as a separate `.json` file in the `custom_levels/` directory, named `PlayerName_1.json`, `PlayerName_2.json`, etc.
+
+## 🙏 Credits
+
+This game was created by **Redha**
