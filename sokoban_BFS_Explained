@@ -1,0 +1,246 @@
+import numpy as np
+import pygame
+from collections import deque
+import sys
+import time
+import math
+
+# Constants for board tiles
+class Tile:
+    EMPTY = 0
+    WALL = 1
+    PLAYER = 2
+    BOX = 3
+    TARGET = 4
+
+# Enhanced color palette for visualization
+COLORS = {
+    'background': (245, 245, 245),
+    'wall': (40, 40, 40),
+    'grid': (210, 210, 210),
+    'text': (10, 10, 10),
+    'instructions': (100, 100, 100),
+    'path_explored': (190, 190, 190),     # Faint gray for all tried paths
+    'path_current': (255, 190, 0),        # Gold for the path to the current node
+    'path_solution_line': (0, 200, 0),    # Bright green for the final solution path
+    'path_solution_arrow': (0, 120, 0),   # Darker green for arrows
+    'target': (255, 165, 0, 150)          # A soft orange for the target tile
+}
+CELL_SIZE = 70
+FPS = 60
+
+class SokobanGame:
+    def __init__(self, board_layout, assets_path):
+        """Initialize game with board, assets, and state."""
+        self.initial_board = np.array(board_layout)
+        self.assets_path = assets_path
+        
+        # State machine for program flow: PAUSED, SEARCHING, SOLVED
+        self.mode = "PAUSED"
+        
+        pygame.init()
+        screen_height = self.initial_board.shape[0] * CELL_SIZE + 100
+        screen_width = self.initial_board.shape[1] * CELL_SIZE
+        self.screen = pygame.display.set_mode((screen_width, screen_height))
+        pygame.display.set_caption("Definitive BFS Visualization")
+        self.font_status = pygame.font.SysFont('Arial', 24, bold=True)
+        self.font_controls = pygame.font.SysFont('Arial', 18)
+        self.clock = pygame.time.Clock()
+        self.images = self.load_assets()
+
+    def load_assets(self):
+        """Load and scale game assets."""
+        try:
+            player_img = pygame.image.load(f"{self.assets_path}/playerFace.png")
+            box_img = pygame.image.load(f"{self.assets_path}/box.png")
+            return {
+                Tile.PLAYER: pygame.transform.scale(player_img, (CELL_SIZE, CELL_SIZE)),
+                Tile.BOX: pygame.transform.scale(box_img, (CELL_SIZE, CELL_SIZE)),
+            }
+        except pygame.error as e:
+            print(f"Error loading assets: {e}"); pygame.quit(); sys.exit(1)
+
+    def _pos_to_pixels(self, pos):
+        """Convert grid position (row, col) to pixel coordinates (x, y)."""
+        return (pos[1] * CELL_SIZE + CELL_SIZE // 2, pos[0] * CELL_SIZE + CELL_SIZE // 2)
+
+    def _get_element_positions(self, board_state):
+        """Find positions of player, boxes, and original targets."""
+        player_pos = tuple(np.argwhere(board_state == Tile.PLAYER)[0])
+        box_positions = [tuple(pos) for pos in np.argwhere(board_state == Tile.BOX)]
+        original_target_positions = [tuple(pos) for pos in np.argwhere(self.initial_board == Tile.TARGET)]
+        return player_pos, box_positions, original_target_positions
+
+    def draw_state(self, board, visited_paths, current_path_coords=None, solution_path_coords=None, queue_size=0):
+        """A master drawing function that can render any state of the application."""
+        self.screen.fill(COLORS['background'])
+
+        # 1. Draw all explored "trial and error" paths in gray
+        for path in visited_paths.values():
+            if len(path) > 1:
+                pygame.draw.lines(self.screen, COLORS['path_explored'], False, [self._pos_to_pixels(p) for p in path], 4)
+
+        # 2. Draw the "current" search path in yellow (only during search)
+        if self.mode in ["SEARCHING", "PAUSED"] and current_path_coords and len(current_path_coords) > 1:
+            pygame.draw.lines(self.screen, COLORS['path_current'], False, [self._pos_to_pixels(p) for p in current_path_coords], 6)
+
+        # 3. Draw the final solution path in green (only when solved)
+        if self.mode == "SOLVED" and solution_path_coords and len(solution_path_coords) > 1:
+            pixel_path = [self._pos_to_pixels(p) for p in solution_path_coords]
+            pygame.draw.lines(self.screen, COLORS['path_solution_line'], False, pixel_path, 8)
+            # Draw directional arrows on the solution path
+            for i in range(len(pixel_path) - 1):
+                self.draw_arrow(self.screen, pixel_path[i], pixel_path[i+1], COLORS['path_solution_arrow'], 15, 8)
+
+        # 4. Draw the board (grid, walls, targets)
+        _, box_positions, target_positions = self._get_element_positions(board)
+        player_pos = self._get_element_positions(board)[0]
+
+        for r in range(self.initial_board.shape[0]):
+            for c in range(self.initial_board.shape[1]):
+                rect = pygame.Rect(c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+                # Draw target squares first
+                if (r, c) in target_positions:
+                    target_rect = rect.inflate(-10, -10)
+                    pygame.draw.rect(self.screen, COLORS['target'], target_rect, border_radius=8)
+                # Draw walls
+                if self.initial_board[r, c] == Tile.WALL:
+                    pygame.draw.rect(self.screen, COLORS['wall'], rect)
+                else: # Draw grid lines for empty spaces
+                    pygame.draw.rect(self.screen, COLORS['grid'], rect, 1)
+
+        # 5. Draw items (player, box) on top
+        for pos in box_positions:
+            self.screen.blit(self.images[Tile.BOX], (pos[1] * CELL_SIZE, pos[0] * CELL_SIZE))
+        self.screen.blit(self.images[Tile.PLAYER], (player_pos[1] * CELL_SIZE, player_pos[0] * CELL_SIZE))
+        
+        # 6. Draw Status and Controls Text
+        bottom_y = self.initial_board.shape[0] * CELL_SIZE
+        # Status Text
+        status_text = f"Mode: {self.mode} | Frontier (Queue): {queue_size} | Visited States: {len(visited_paths)}"
+        status_surface = self.font_status.render(status_text, True, COLORS['text'])
+        self.screen.blit(status_surface, (10, bottom_y + 10))
+        # Controls Text
+        if self.mode != "SOLVED":
+            controls_text = " [SPACE] Run/Pause | [RIGHT ARROW] Step (when paused) | [Q] Quit"
+        else:
+            controls_text = f"SOLVED! Optimal Path: {len(solution_path_coords)-1} moves. Press [Q] to exit."
+        controls_surface = self.font_controls.render(controls_text, True, COLORS['instructions'])
+        self.screen.blit(controls_surface, (10, bottom_y + 50))
+        
+        pygame.display.flip()
+
+    def draw_arrow(self, surface, start_pos, end_pos, color, size, width):
+        """Draws a static, filled arrow polygon on the surface."""
+        angle = math.atan2(end_pos[1] - start_pos[1], end_pos[0] - start_pos[0])
+        
+        # Calculate the point for the arrow head
+        arrow_head = end_pos
+        
+        # Calculate the two points for the arrow base
+        angle1 = angle + math.radians(150)
+        angle2 = angle - math.radians(150)
+        p1 = (arrow_head[0] + size * math.cos(angle1), arrow_head[1] + size * math.sin(angle1))
+        p2 = (arrow_head[0] + size * math.cos(angle2), arrow_head[1] + size * math.sin(angle2))
+
+        pygame.draw.polygon(surface, color, (arrow_head, p1, p2))
+
+    def get_board_state_key(self, board_state):
+        player_pos, box_positions, _ = self._get_element_positions(board_state)
+        return (player_pos, tuple(sorted(box_positions)))
+
+    def is_win(self, board_state):
+        _, _, target_positions = self._get_element_positions(board_state)
+        return all(board_state[pos] == Tile.BOX for pos in target_positions)
+
+    def bfs_solver(self):
+        """The main application loop managing search and display."""
+        initial_player_pos, _, _ = self._get_element_positions(self.initial_board)
+        queue = deque([(self.initial_board.copy(), [initial_player_pos])])
+        initial_key = self.get_board_state_key(self.initial_board)
+        visited_paths = {initial_key: [initial_player_pos]}
+        
+        current_board = self.initial_board.copy()
+        current_path_coords = [initial_player_pos]
+        
+        while True:
+            # --- Event Handling ---
+            step_request = False
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_q):
+                    pygame.quit(); sys.exit()
+                if event.type == pygame.KEYDOWN:
+                    if self.mode != "SOLVED":
+                        if event.key == pygame.K_SPACE:
+                            self.mode = "SEARCHING" if self.mode == "PAUSED" else "PAUSED"
+                        if event.key == pygame.K_RIGHT and self.mode == "PAUSED":
+                            step_request = True
+            
+            # --- BFS Logic (only runs if searching) ---
+            if (self.mode == "SEARCHING" or step_request) and queue:
+                current_board, current_path_coords = queue.popleft()
+
+                if self.is_win(current_board):
+                    self.mode = "SOLVED"
+                    # The loop will now transition to drawing the solved state permanently
+                    continue
+
+                player_pos = current_path_coords[-1]
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    new_player_pos = (player_pos[0] + dr, player_pos[1] + dc)
+                    if self.initial_board[new_player_pos] == Tile.WALL: continue
+                    
+                    next_board = current_board.copy()
+                    is_move_valid = False
+                    if next_board[new_player_pos] in [Tile.EMPTY, Tile.TARGET]:
+                        is_move_valid = True
+                    elif next_board[new_player_pos] == Tile.BOX:
+                        box_new_pos = (new_player_pos[0] + dr, new_player_pos[1] + dc)
+                        if next_board[box_new_pos] in [Tile.EMPTY, Tile.TARGET]:
+                            next_board[box_new_pos] = Tile.BOX
+                            is_move_valid = True
+                    
+                    if is_move_valid:
+                        next_board[player_pos] = Tile.EMPTY
+                        if self.initial_board[player_pos] == Tile.TARGET: next_board[player_pos] = Tile.TARGET
+                        next_board[new_player_pos] = Tile.PLAYER
+                        
+                        state_key = self.get_board_state_key(next_board)
+                        if state_key not in visited_paths:
+                            new_path = current_path_coords + [new_player_pos]
+                            visited_paths[state_key] = new_path
+                            queue.append((next_board, new_path))
+            
+            # --- Drawing (always runs) ---
+            if self.mode == "SOLVED":
+                self.draw_state(current_board, visited_paths, solution_path_coords=current_path_coords, queue_size=0)
+            else:
+                self.draw_state(current_board, visited_paths, current_path_coords=current_path_coords, queue_size=len(queue))
+
+            if not queue and self.mode != "SOLVED":
+                self.mode = "SOLVED" # Treat "no solution" as a final state
+                current_path_coords = [] # No solution path
+
+            self.clock.tick(FPS)
+
+def main():
+    # A larger 8x7 board for a more interesting search
+    initial_board = [
+        [1, 1, 1, 1, 1, 1, 1, 1],
+        [1, 4, 0, 0, 1, 0, 0, 1],
+        [1, 0, 3, 0, 1, 0, 0, 1],
+        [1, 0, 2, 0, 0, 0, 0, 1],
+        [1, 0, 0, 0, 1, 0, 0, 1],
+        [1, 0, 0, 0, 1, 0, 0, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1],
+    ]
+    
+    # IMPORTANT: Change this to your actual assets folder path
+    # Example: "C:/Users/YourUser/Documents/Sokoban/assets" or "./assets"
+    assets_path = "./assets" 
+
+    game = SokobanGame(initial_board, assets_path)
+    game.bfs_solver()
+
+if __name__ == "__main__":
+    main()
