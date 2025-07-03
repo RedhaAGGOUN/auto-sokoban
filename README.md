@@ -120,5 +120,5 @@ Use code with caution.
 Player Progress: All player profiles, stars earned, and last play times are stored in sokoban_save.json.
 Custom Levels: Each custom level is saved as a separate .json file in the custom_levels/ directory, named PlayerName_1.json, etc.
 🙏 Credits
-This game was created by Redha as a project for La Plateforme_.
+This game was created as a project for La Plateforme_.
 Generated code
