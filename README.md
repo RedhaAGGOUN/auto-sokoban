@@ -5,7 +5,6 @@
 
 A feature-rich implementation of the classic puzzle game Sokoban, built with Python and Pygame. It includes a modern UI, a level editor, a player ranking system, an in-game AI solver, and a separate educational tool to visualize pathfinding algorithms.
 
-![Sokoban Gameplay Screenshot](https://github.com/user-attachments/assets/b83375c3-1e4e-4e4b-b2c6-d97f5ac04a11)
 
 ## ✨ Key Features
 
